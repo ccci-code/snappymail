@@ -1601,6 +1601,8 @@ export class ComposePopupView extends AbstractViewPopup {
 							pass.remember && Passphrases.handle(identity, pass.password);
 							isSigned = true;
 						}
+					} else {
+						isSigned = true;
 					}
 				}
 			}

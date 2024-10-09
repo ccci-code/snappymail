@@ -184,11 +184,24 @@ export class MailMessageView extends AbstractViewRight {
 				&& !currentMessage()?.flags().includes('$mdnsent')
 				&& !currentMessage()?.flags().includes('\\answered'),
 
+			//don't show smime attachments
 			listAttachments: () => currentMessage()?.attachments()
-				.filter(item => SettingsUserStore.listInlineAttachments() || !item.isLinked()),
-//			hasAttachments: () => currentMessage()?.attachments()?.length,
+				.filter(item => {
+					return item.mimeType != "application/pkcs7-mime" &&
+						(SettingsUserStore.listInlineAttachments() || !item.isLinked())
+				}),
+			//don't show smime.p7m as attachments
 			hasAttachments: () => currentMessage()?.attachments()
-				.some(item => SettingsUserStore.listInlineAttachments() || !item.isLinked()),
+				.some(item => {
+					return item.mimeType != "application/pkcs7-mime" &&
+						(SettingsUserStore.listInlineAttachments() || !item.isLinked())
+				}),
+
+//			listAttachments: () => currentMessage()?.attachments()
+//				.filter(item => SettingsUserStore.listInlineAttachments() || !item.isLinked()),
+//			hasAttachments: () => currentMessage()?.attachments()?.length,
+//			hasAttachments: () => currentMessage()?.attachments()
+//				.some(item => SettingsUserStore.listInlineAttachments() || !item.isLinked()),
 //			listInline: () => currentMessage()?.attachments().filter(item => item.isLinked()),
 //			hasInline: () => currentMessage()?.attachments().some(item => item.isLinked()),
 

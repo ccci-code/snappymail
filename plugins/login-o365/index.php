@@ -18,9 +18,9 @@ use RainLoop\Providers\Storage\Enumerations\StorageType;
 class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 {
 	const
-		NAME     = 'Office365/Outlook OAuth2',
-		VERSION  = '0.3',
-		RELEASE  = '2024-09-29',
+		NAME = 'Office365/Outlook OAuth2',
+		VERSION = '0.3',
+		RELEASE = '2024-09-29',
 		REQUIRED = '2.36.1',
 		CATEGORY = 'Login',
 		DESCRIPTION = 'Office365/Outlook IMAP, Sieve & SMTP login using RFC 7628 OAuth2';
@@ -32,21 +32,20 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 
 	private static ?array $auth = null;
 
-	public function Init() : void
+	public function Init(): void
 	{
 		$this->UseLangs(true);
 		$this->addJs('LoginOAuth2.js');
 		$this->addHook('imap.before-login', 'clientLogin');
 		$this->addHook('smtp.before-login', 'clientLogin');
 		$this->addHook('sieve.before-login', 'clientLogin');
-
 		$this->addPartHook('LoginO365', 'ServiceLoginO365');
 
 		// Prevent Disallowed Sec-Fetch Dest: document Mode: navigate Site: cross-site User: true
 		$this->addHook('filter.http-paths', 'httpPaths');
 	}
 
-	public function httpPaths(array &$aPaths) : void
+	public function httpPaths(array &$aPaths): void
 	{
 		// Personal accounts workaround
 		if (!empty($_SERVER['PATH_INFO']) && \str_ends_with($_SERVER['PATH_INFO'], 'LoginO365')) {
@@ -55,20 +54,21 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 
 		if (!empty($aPaths[0]) && 'LoginO365' === $aPaths[0]) {
 			$oConfig = \RainLoop\Api::Config();
-			$oConfig->Set('security', 'secfetch_allow',
+			$oConfig->Set(
+				'security',
+				'secfetch_allow',
 				\trim($oConfig->Get('security', 'secfetch_allow', '') . ';site=cross-site', ';')
 			);
 		}
 	}
 
-	public function ServiceLoginO365() : string
+	public function ServiceLoginO365(): string
 	{
 		$oActions = \RainLoop\Api::Actions();
 		$oHttp = $oActions->Http();
 		$oHttp->ServerNoCache();
 
-		try
-		{
+		try {
 			if (isset($_GET['error'])) {
 				throw new \RuntimeException("{$_GET['error']}: {$_GET['error_description']}");
 			}
@@ -84,11 +84,14 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 
 			$iExpires = \time();
 			$aResponse = $oO365->getAccessToken(
-				\str_replace('{{tenant}}', $this->Config()->Get('plugin', 'tenant', 'common'), static::TOKEN_URI),
+				\str_replace('{{tenant}}', $this->Config()->Get('plugin', 'tenant_id', 'common'), static::TOKEN_URI),
 				'authorization_code',
 				array(
 					'code' => $_GET['code'],
-					'redirect_uri' => $oHttp->GetFullUrl().'?LoginO365'
+					'client_id' => $this->Config()->Get('plugin', 'client_id', ''),
+					'client_secret' => $this->Config()->Get('plugin', 'client_secret', ''),
+					'scope' => $this->Config()->Get('plugin', 'scopes', 'offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send'),
+					'redirect_uri' => $oHttp->GetFullUrl() . '?LoginO365'
 				)
 			);
 			if (200 != $aResponse['code']) {
@@ -110,20 +113,24 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 			if (empty($aResponse['refresh_token'])) {
 				throw new \RuntimeException('refresh_token missing');
 			}
-
+			//$oActions->Logger()->Write(json_encode($aResponse), \LOG_ERR);
 			$sAccessToken = $aResponse['access_token'];
 			$iExpires += $aResponse['expires_in'];
 
 			$oO365->setAccessToken($sAccessToken);
-			$aUserInfo = $oO365->fetch('https://graph.microsoft.com/oidc/userinfo');
-			if (200 != $aUserInfo['code']) {
-				throw new \RuntimeException("HTTP: {$aResponse['code']}");
-			}
-			$aUserInfo = $aUserInfo['result'];
-			if (empty($aUserInfo['id'])) {
-				throw new \RuntimeException('unknown id');
-			}
-			if (empty($aUserInfo['email'])) {
+			$oO365->setAccessTokenType(OAuth2\Client::ACCESS_TOKEN_BEARER);
+			list($header, $payload, $signature) = explode('.', $sAccessToken);
+			$jsonToken = base64_decode($payload);
+			$aUserInfo = json_decode($jsonToken, true);
+			//$aUserInfo = $oO365->fetch('https://graph.microsoft.com/oidc/userinfo');
+			//if (200 != $aUserInfo['code']) {
+			//      throw new \RuntimeException("HTTP: {$aResponse['code']}");
+			//}
+			//$aUserInfo = $aUserInfo['result'];
+			//if (empty($aUserInfo['id'])) {
+			//      throw new \RuntimeException('unknown id');
+			//}
+			if (empty($aUserInfo['upn'])) {
 				throw new \RuntimeException('unknown email address');
 			}
 
@@ -134,26 +141,27 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 				'expires' => $iExpires
 			];
 
-			$oPassword = new \SnappyMail\SensitiveString($aUserInfo['id']);
-			$oAccount = $oActions->LoginProcess($aUserInfo['email'], $oPassword);
-//			$oAccount = MainAccount::NewInstanceFromCredentials($oActions, $aUserInfo['email'], $aUserInfo['email'], $oPassword, true);
+			$oPassword = new \SnappyMail\SensitiveString($sAccessToken);
+			$oAccount = $oActions->LoginProcess($aUserInfo['upn'], $oPassword);
+			//                      $oAccount = MainAccount::NewInstanceFromCredentials($oActions, $aUserInfo['email'], $aUserInfo['email'], $oPassword, true);
 			if ($oAccount) {
-//				$oActions->SetMainAuthAccount($oAccount);
-//				$oActions->SetAuthToken($oAccount);
-				$oActions->StorageProvider()->Put($oAccount, StorageType::SESSION, \RainLoop\Utils::GetSessionToken(),
-					\SnappyMail\Crypt::EncryptToJSON(static::$auth, $oAccount->CryptKey())
+				//                              $oActions->SetMainAuthAccount($oAccount);
+				//                              $oActions->SetAuthToken($oAccount);
+				$oActions->StorageProvider()->Put(
+					$oAccount,
+					StorageType::SESSION,
+					\RainLoop\Utils::GetSessionToken(),
+					\SnappyMail\Crypt::EncryptToJSON(static::$auth, true) //$oAccount->CryptKey()
 				);
 			}
-		}
-		catch (\Exception $oException)
-		{
+		} catch (\Exception $oException) {
 			$oActions->Logger()->WriteException($oException, \LOG_ERR);
 		}
 		$oActions->Location(\RainLoop\Utils::WebPath());
 		exit;
 	}
 
-	public function configMapping() : array
+	public function configMapping(): array
 	{
 		return [
 			\RainLoop\Plugins\Property::NewInstance('personal')
@@ -173,25 +181,36 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 				->SetEncrypted(),
 			\RainLoop\Plugins\Property::NewInstance('tenant_id')
 				->SetLabel('Tenant ID')
+				->SetAllowedInJs()
 				->SetType(\RainLoop\Enumerations\PluginPropertyType::STRING),
 			\RainLoop\Plugins\Property::NewInstance('tenant')->SetLabel('Tenant')
 				->SetType(\RainLoop\Enumerations\PluginPropertyType::SELECTION)
-				->SetDefaultValue(['common','consumers','organizations'])
+				->SetDefaultValue(['common', 'consumers', 'organizations'])
+				->SetAllowedInJs(),
+			\RainLoop\Plugins\Property::NewInstance('scopes')
+				->SetLabel('Scopes')
 				->SetAllowedInJs()
+				->SetDescription('Scope refers to the scope of the authorization (permission) being requested by and/or granted to an application')
+				->SetType(\RainLoop\Enumerations\PluginPropertyType::STRING),
+			\RainLoop\Plugins\Property::NewInstance('email_domain')
+				->SetLabel('Email domain')
+				->SetType(\RainLoop\Enumerations\PluginPropertyType::STRING)
+				->SetAllowedInJs()
+				->SetDescription('Email domain, example: @mydomain.com'),
 		];
 	}
 
-	public function clientLogin(\RainLoop\Model\Account $oAccount, \MailSo\Net\NetClient $oClient, \MailSo\Net\ConnectSettings $oSettings) : void
+	public function clientLogin(\RainLoop\Model\Account $oAccount, \MailSo\Net\NetClient $oClient, \MailSo\Net\ConnectSettings $oSettings): void
 	{
-		if ($oAccount instanceof MainAccount && \str_ends_with($oAccount->Email(), '@hotmail.com')) {
+		if ($oAccount instanceof MainAccount) { //&& \str_ends_with($oAccount->Email(), $this->Config()->Get('plugin', 'email_domain', '@outlook.com'))
 			$oActions = \RainLoop\Api::Actions();
 			try {
 				$aData = static::$auth ?: \SnappyMail\Crypt::DecryptFromJSON(
 					$oActions->StorageProvider()->Get($oAccount, StorageType::SESSION, \RainLoop\Utils::GetSessionToken()),
-					$oAccount->CryptKey()
+					true //$oAccount->CryptKey()
 				);
 			} catch (\Throwable $oException) {
-//				$oActions->Logger()->WriteException($oException, \LOG_ERR);
+				//$oActions->Logger()->WriteException($oException, \LOG_ERR);
 				return;
 			}
 			if (!empty($aData['expires']) && !empty($aData['access_token']) && !empty($aData['refresh_token'])) {
@@ -200,32 +219,35 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 					$oO365 = $this->o365Connector();
 					if ($oO365) {
 						$aRefreshTokenResponse = $oO365->getAccessToken(
-							\str_replace('{{tenant}}', $this->Config()->Get('plugin', 'tenant', 'common'), static::TOKEN_URI),
+							\str_replace('{{tenant}}', $this->Config()->Get('plugin', 'tenant_id', ''), static::TOKEN_URI),
 							'refresh_token',
-							array('refresh_token' => $aData['refresh_token'])
+							array('refresh_token' => $aData['refresh_token'], 'scope' => $this->Config()->Get('plugin', 'scopes', 'offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send'))
 						);
 						if (!empty($aRefreshTokenResponse['result']['access_token'])) {
 							$aData['access_token'] = $aRefreshTokenResponse['result']['access_token'];
-							$aResponse['expires'] = $iExpires + $aResponse['expires_in'];
-							$oActions->StorageProvider()->Put($oAccount, StorageType::SESSION, \RainLoop\Utils::GetSessionToken(),
-								\SnappyMail\Crypt::EncryptToJSON($aData, $oAccount->CryptKey())
+							$aData['expires'] = $iExpires + $aRefreshTokenResponse['result']['expires_in'];
+							$oActions->StorageProvider()->Put(
+								$oAccount,
+								StorageType::SESSION,
+								\RainLoop\Utils::GetSessionToken(),
+								\SnappyMail\Crypt::EncryptToJSON($aData, true) //$oAccount->CryptKey())
 							);
 						}
 					}
 				}
 				$oSettings->passphrase = $aData['access_token'];
-				\array_unshift($oSettings->SASLMechanisms, 'OAUTHBEARER', 'XOAUTH2');
+				//removed  'OAUTHBEARER',
+				\array_unshift($oSettings->SASLMechanisms, 'XOAUTH2');
 			}
 		}
 	}
 
-	protected function o365Connector() : ?\OAuth2\Client
+	protected function o365Connector(): ?\OAuth2\Client
 	{
 		$client_id = \trim($this->Config()->Get('plugin', 'client_id', ''));
 		$client_secret = \trim($this->Config()->getDecrypted('plugin', 'client_secret', ''));
 		if ($client_id && $client_secret) {
-			try
-			{
+			try {
 				$oO365 = new \OAuth2\Client($client_id, $client_secret);
 				$oActions = \RainLoop\Api::Actions();
 				$sProxy = $oActions->Config()->Get('labs', 'curl_proxy', '');
@@ -237,9 +259,7 @@ class LoginO365Plugin extends \RainLoop\Plugins\AbstractPlugin
 					}
 				}
 				return $oO365;
-			}
-			catch (\Exception $oException)
-			{
+			} catch (\Exception $oException) {
 				$oActions->Logger()->WriteException($oException, \LOG_ERR);
 			}
 		}

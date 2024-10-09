@@ -177,7 +177,14 @@ class OpenSSL
 	{
 		if (\is_string($input)) {
 			$tmp = new Temporary('smimein-');
-			if (!$tmp->putContents($input)) {
+			$header = "MIME-Version: 1.0
+Content-Disposition: attachment; filename=\"smime.p7m\"
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data;
+name=\"smime.p7m\"
+Content-Transfer-Encoding: base64
+
+";
+			if (!$tmp->putContents($header.$input)) {
 				return null;
 			}
 			$input = $tmp;
