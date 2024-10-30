@@ -11,11 +11,17 @@ COPY . .
 # Patch release.php with hotfix from: https://github.com/xgbstar1/snappymail-docker/blob/main/Dockerfile, so that release.php doesn't fail with error
 RUN sed -i 's_^if.*rename.*snappymail.v.0.0.0.*$_if (!!system("mv snappymail/v/0.0.0 snappymail/v/{$package->version}")) {_' cli/release.php  || true
 RUN php release.php
+RUN php release.php --plugins
 RUN set -eux; \
     VERSION=$( ls build/dist/releases/webmail ); \
     ls -al build/dist/releases/webmail/$VERSION/snappymail-$VERSION.tar.gz; \
     mkdir -p /snappymail; \
     tar -zxvf build/dist/releases/webmail/$VERSION/snappymail-$VERSION.tar.gz -C /snappymail; \
+    mkdir -p /snappymail/repository/v2; \
+    cp -R build/dist/releases/plugins/ /snappymail/repository/v2/; \
+    cp build/dist/releases/packages.json /snappymail/repository/v2/; \
+    ls -lat /snappymail/repository/v2/; \
+    ls -lat build/dist/releases/; \
     find /snappymail -type d -exec chmod 550 {} \; ; \
     find /snappymail -type f -exec chmod 440 {} \; ; \
     find /snappymail/data -type d -exec chmod 750 {} \; ; \
@@ -178,6 +184,7 @@ RUN set -eux; \
     mv -v /usr/local/etc/php-fpm.d/docker.conf /usr/local/etc/php-fpm.d/docker.conf.disabled; \
     mv -v /usr/local/etc/php-fpm.d/www.conf /usr/local/etc/php-fpm.d/www.conf.disabled; \
     mv -v /usr/local/etc/php-fpm.d/zz-docker.conf /usr/local/etc/php-fpm.d/zz-docker.conf.disabled;
+    ls -lt /snappymail/;
 
 USER root
 WORKDIR /snappymail
