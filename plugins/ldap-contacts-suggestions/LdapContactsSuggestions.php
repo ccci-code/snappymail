@@ -16,6 +16,8 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 
 	private string $sObjectClasses = 'inetOrgPerson';
 
+	private string $sFilters = '';
+
 	private string $sUidAttributes = 'uid';
 
 	private string $sNameAttributes = 'displayName,cn,givenName,sn';
@@ -31,6 +33,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 	 * @param string $sBindPassword
 	 * @param string $sBaseDn
 	 * @param string $sObjectClasses
+	 * @param string $sFilters
 	 * @param string $sNameAttributes
 	 * @param string $sEmailAttributes
 	 * @param string $sUidAttributes
@@ -38,7 +41,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 	 *
 	 * @return \LdapContactsSuggestions
 	 */
-	public function SetConfig($sLdapUri, $bUseStartTLS, $sBindDn, $sBindPassword, $sBaseDn, $sObjectClasses, $sUidAttributes, $sNameAttributes, $sEmailAttributes, $sAllowedEmails)
+	public function SetConfig($sLdapUri, $bUseStartTLS, $sBindDn, $sBindPassword, $sBaseDn, $sObjectClasses, $sFilters, $sUidAttributes, $sNameAttributes, $sEmailAttributes, $sAllowedEmails)
 	{
 		$this->sLdapUri = $sLdapUri;
 		$this->bUseStartTLS = $bUseStartTLS;
@@ -48,6 +51,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 		}
 		$this->sBaseDn = $sBaseDn;
 		$this->sObjectClasses = $sObjectClasses;
+		$this->sFilters = $sFilters;
 		$this->sUidAttributes = $sUidAttributes;
 		$this->sNameAttributes = $sNameAttributes;
 		$this->sEmailAttributes = $sEmailAttributes;
@@ -60,10 +64,11 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 	{
 		$sQuery = \trim($sQuery);
 
-		if (2 > \strlen($sQuery)
-		 || !$oAccount
-		 || !\RainLoop\Plugins\Helper::ValidateWildcardValues($oAccount->Email(), $this->sAllowedEmails))
-		{
+		if (
+			2 > \strlen($sQuery)
+			|| !$oAccount
+			|| !\RainLoop\Plugins\Helper::ValidateWildcardValues($oAccount->Email(), $this->sAllowedEmails)
+		) {
 			return array();
 		}
 
@@ -75,6 +80,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 			$this->logWrite('ldap_connect: connected', \LOG_INFO, 'LDAP');
 
 			@\ldap_set_option($oCon, LDAP_OPT_PROTOCOL_VERSION, 3);
+			@\ldap_set_option($oCon, LDAP_OPT_REFERRALS, 0);
 
 			if ($this->bUseStartTLS && !@\ldap_start_tls($oCon)) {
 				$this->logLdapError($oCon, 'ldap_start_tls');
@@ -93,7 +99,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 			$sDomain = \MailSo\Base\Utils::getEmailAddressDomain($oAccount->Email());
 			$sBaseDn = \strtr($this->sBaseDn, array(
 				'{domain}' => $sDomain,
-				'{domain:dc}' => 'dc='.\strtr($sDomain, array('.' => ',dc=')),
+				'{domain:dc}' => 'dc=' . \strtr($sDomain, array('.' => ',dc=')),
 				'{email}' => $oAccount->Email(),
 				'{email:user}' => \MailSo\Base\Utils::getEmailAddressLocalPart($oAccount->Email()),
 				'{email:domain}' => $sDomain,
@@ -114,32 +120,34 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 			$aUIDs = \array_map('trim', $aUIDs);
 
 			$aFields = \array_merge($aEmails, $aNames, $aUIDs);
+			$aItems = array();
+			$sSubFilter = '';
+			foreach ($aFields as $sItem) {
+				if (!empty($sItem)) {
+					$aItems[] = $sItem;
+					$sSubFilter .= '(' . $sItem . '=*' . $sSearchEscaped . '*)';
+				}
+			}
 
 			$iObjCount = 0;
 			$sObjFilter = '';
 			foreach ($aObjectClasses as $sItem) {
 				if (!empty($sItem)) {
 					++$iObjCount;
-					$sObjFilter .= '(objectClass='.$sItem.')';
-				}
-			}
-
-
-			$aItems = array();
-			$sSubFilter = '';
-			foreach ($aFields as $sItem) {
-				if (!empty($sItem)) {
-					$aItems[] = $sItem;
-					$sSubFilter .= '('.$sItem.'=*'.$sSearchEscaped.'*)';
+					$sObjFilter .= '(objectClass=' . $sItem . ')';
 				}
 			}
 
 			$sFilter = '(&';
-			$sFilter .= (1 < $iObjCount ? '(|' : '').$sObjFilter.(1 < $iObjCount ? ')' : '');
-			$sFilter .= (1 < count($aItems) ? '(|' : '').$sSubFilter.(1 < count($aItems) ? ')' : '');
+			$sFilter .= (1 < $iObjCount ? '(|' : '') . $sObjFilter . (1 < $iObjCount ? ')' : '');
+			$sFilter .= (1 < count($aItems) ? '(|' : '') . $sSubFilter . (1 < count($aItems) ? ')' : '');
+			//added sah to include additional filters
+			if (isset($this->sFilters) && strlen($this->sFilters) > 5) {
+				$sFilter .= $this->sFilters;
+			}
 			$sFilter .= ')';
 
-			$this->logWrite('ldap_search: start: '.$sBaseDn.' / '.$sFilter, \LOG_INFO, 'LDAP');
+			$this->logWrite('ldap_search: start: ' . $sBaseDn . ' / ' . $sFilter, \LOG_INFO, 'LDAP');
 			$oS = @\ldap_search($oCon, $sBaseDn, $sFilter, $aItems, 0, 30, 30);
 			if ($oS) {
 				$aEntries = @\ldap_get_entries($oCon, $oS);
@@ -151,7 +159,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 					foreach ($aEntries as $aItem) {
 						if ($aItem) {
 							$sName = $sEmail = '';
-							list ($sEmail, $sName) = $this->findNameAndEmail($aItem, $aEmails, $aNames, $aUIDs);
+							list($sEmail, $sName) = $this->findNameAndEmail($aItem, $aEmails, $aNames, $aUIDs);
 							if (!empty($sEmail)) {
 								$aResult[] = array($sEmail, $sName);
 							}
@@ -225,7 +233,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 		$aChars = array('\\', '*', '(', ')', \chr(0));
 
 		foreach ($aChars as $iIndex => $sValue) {
-			$aNewChars[$iIndex] = '\\'.\str_pad(\dechex(\ord($sValue)), 2, '0');
+			$aNewChars[$iIndex] = '\\' . \str_pad(\dechex(\ord($sValue)), 2, '0');
 		}
 
 		return \str_replace($aChars, $aNewChars, $sStr);
@@ -242,7 +250,7 @@ class LdapContactsSuggestions implements \RainLoop\Providers\Suggestions\ISugges
 		if ($this->oLogger) {
 			$sError = $oCon ? @\ldap_error($oCon) : '';
 			$iErrno = $oCon ? @\ldap_errno($oCon) : 0;
-			$this->logWrite($sCmd.' error: '.$sError.' ('.$iErrno.')', \LOG_WARNING, 'LDAP');
+			$this->logWrite($sCmd . ' error: ' . $sError . ' (' . $iErrno . ')', \LOG_WARNING, 'LDAP');
 		}
 	}
 }

@@ -184,16 +184,16 @@ export class MailMessageView extends AbstractViewRight {
 				&& !currentMessage()?.flags().includes('$mdnsent')
 				&& !currentMessage()?.flags().includes('\\answered'),
 
-			//don't show smime attachments
+			//sah don't show smime attachments
 			listAttachments: () => currentMessage()?.attachments()
 				.filter(item => {
-					return item.mimeType != "application/pkcs7-mime" &&
+					return item.mimeType != "application/pkcs7-mime" && item.mimeType != "application/pkcs7-signature" &&
 						(SettingsUserStore.listInlineAttachments() || !item.isLinked())
 				}),
-			//don't show smime.p7m as attachments
+			//sah don't show smime.p7m as attachments
 			hasAttachments: () => currentMessage()?.attachments()
 				.some(item => {
-					return item.mimeType != "application/pkcs7-mime" &&
+					return item.mimeType != "application/pkcs7-mime" && item.mimeType != "application/pkcs7-signature" &&
 						(SettingsUserStore.listInlineAttachments() || !item.isLinked())
 				}),
 

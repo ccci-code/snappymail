@@ -9,6 +9,9 @@
 </div>
 <form action="#/"  spellcheck="false" method="POST"
 	data-bind="submit: submitForm, css: {'errorAnimated': formError, 'submitting': submitRequest()}">
+	<input type="hidden" name="Email" value="no_reply@example.com"/>
+	<input type="hidden" name="Password" value="123456"/>
+	<!--
 	<div class="controls" data-bind="css: {'error': emailError}">
 		<span class="fontastic">✉</span>
 		<input name="Email" required="" type="text" class="input-block-level" pattern="[^@\s]+(@[^\s]+)?" inputmode="email"
@@ -37,6 +40,7 @@
 			</a>
 		</div>
 	</div>
+-->
 	<div>
 		<button class="btn btn-large buttonLogin"
 			data-bind="command: submitCommand"
